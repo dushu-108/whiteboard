@@ -8,7 +8,7 @@ const RoomJoin = () => {
 
   const handleJoin = async () => {
     if (!roomId.trim()) return;
-    await axios.post('/api/rooms/join', { roomId });
+    await axios.post('http://localhost:4000/api/rooms/join', { roomId });
     navigate(`/room/${roomId}`);
   };
 
