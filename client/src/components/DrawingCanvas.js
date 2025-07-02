@@ -1,43 +1,116 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useCallback } from 'react';
 
 const DrawingCanvas = ({ socket, toolSettings }) => {
   const canvasRef = useRef(null);
   const ctxRef = useRef(null);
   const drawing = useRef(false);
+  const canvasSize = useRef({ width: 0, height: 0 });
 
+  // Function to clear the canvas
+  const clearCanvas = useCallback(() => {
+    if (ctxRef.current) {
+      const canvas = canvasRef.current;
+      ctxRef.current.clearRect(0, 0, canvas.width, canvas.height);
+    }
+  }, []);
+
+  // Initialize canvas and context
   useEffect(() => {
     const canvas = canvasRef.current;
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight - 60; // minus toolbar height
-    canvas.style.background = 'white';
+    
+    // Set canvas size
+    const updateCanvasSize = () => {
+      const width = window.innerWidth;
+      const height = window.innerHeight - 60; // minus toolbar height
+      canvas.width = width;
+      canvas.height = height;
+      canvasSize.current = { width, height };
+    };
 
+    // Initial setup
+    updateCanvasSize();
+    window.addEventListener('resize', updateCanvasSize);
+    
+    // Initialize context
     const ctx = canvas.getContext('2d');
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    ctx.strokeStyle = toolSettings.color;
+    ctx.lineWidth = toolSettings.width;
     ctxRef.current = ctx;
 
-    socket.on('draw-start', ({ x, y, color, width }) => {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = width;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-    });
-
-    socket.on('draw-move', ({ x, y }) => {
-      ctx.lineTo(x, y);
-      ctx.stroke();
-    });
-
-    socket.on('clear-canvas', () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-    });
-
     return () => {
-      socket.off('draw-start');
-      socket.off('draw-move');
-      socket.off('clear-canvas');
+      window.removeEventListener('resize', updateCanvasSize);
     };
-  }, [socket]);
+  }, []);
+
+  // Update context when tool settings change
+  useEffect(() => {
+    if (!ctxRef.current) return;
+    
+    ctxRef.current.strokeStyle = toolSettings.color;
+    ctxRef.current.lineWidth = toolSettings.width;
+  }, [toolSettings.color, toolSettings.width]);
+
+  // Set up socket listeners
+  useEffect(() => {
+    if (!socket) return;
+
+    // Handle drawing events
+    const handleDrawStart = ({ x, y, color, width }) => {
+      if (!ctxRef.current) return;
+      const currentCtx = ctxRef.current;
+      currentCtx.beginPath();
+      currentCtx.strokeStyle = color || toolSettings.color;
+      currentCtx.lineWidth = width || toolSettings.width;
+      currentCtx.moveTo(x, y);
+    };
+
+    const handleDrawMove = ({ x, y }) => {
+      if (drawing.current && ctxRef.current) {
+        const currentCtx = ctxRef.current;
+        currentCtx.lineTo(x, y);
+        currentCtx.stroke();
+      }
+    };
+
+    // Set up socket listeners with error handling
+    const setupSocketListeners = () => {
+      try {
+        socket.on('draw-start', handleDrawStart);
+        socket.on('draw-move', handleDrawMove);
+        socket.on('clear-canvas', clearCanvas);
+      } catch (error) {
+        console.error('Error setting up socket listeners:', error);
+      }
+    };
+
+    setupSocketListeners();
+
+    // Clean up
+    return () => {
+      try {
+        socket.off('draw-start', handleDrawStart);
+        socket.off('draw-move', handleDrawMove);
+        socket.off('clear-canvas', clearCanvas);
+      } catch (error) {
+        console.error('Error cleaning up socket listeners:', error);
+      }
+    };
+  }, [socket, clearCanvas, toolSettings]);
+
+  // Add debug logging for socket events
+  useEffect(() => {
+    const handleClearCanvas = () => {
+      console.log('Clear canvas event received');
+      clearCanvas();
+    };
+
+    socket.on('clear-canvas', handleClearCanvas);
+    return () => {
+      socket.off('clear-canvas', handleClearCanvas);
+    };
+  }, [socket, clearCanvas]);
 
   const getXY = (e) => {
     const rect = canvasRef.current.getBoundingClientRect();
